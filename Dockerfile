@@ -17,7 +17,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o pub-sub .
 
 # Copy environment file
-COPY env .env
+COPY .env.example .env
 
 # Final stage
 FROM alpine:latest
