@@ -1,0 +1,15 @@
+# Server Configuration
+PORT=8080
+HOST=0.0.0.0
+
+# Topic Configuration
+MAX_MESSAGES_PER_TOPIC=1000
+MAX_PUBLISH_RATE=100
+
+# WebSocket Configuration
+WS_READ_BUFFER_SIZE=1024
+WS_WRITE_BUFFER_SIZE=1024
+
+# Logging Configuration
+LOG_LEVEL=debug
+LOG_FORMAT=text

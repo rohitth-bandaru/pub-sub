@@ -1,0 +1,34 @@
+# Git files
+.git
+.gitignore
+
+# Go files
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test files
+test-client.html
+
+# Documentation
+README.md
+
+# Environment files (keep env, exclude env.example)
+env.example

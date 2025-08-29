@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pub/Sub Test Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .panel {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .panel h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+        .status.connected {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .log {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 10px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .message {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-radius: 3px;
+        }
+        .message.published {
+            background-color: #e7f3ff;
+            border-left: 3px solid #007bff;
+        }
+        .message.received {
+            background-color: #f0f8f0;
+            border-left: 3px solid #28a745;
+        }
+        .message.system {
+            background-color: #fff3cd;
+            border-left: 3px solid #ffc107;
+        }
+        .message.error {
+            background-color: #f8d7da;
+            border-left: 3px solid #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <h1>Pub/Sub Test Client</h1>
+    
+    <div class="container">
+        <div class="panel">
+            <h3>Connection</h3>
+            <div id="connectionStatus" class="status disconnected">
+                Disconnected
+            </div>
+            <div class="form-group">
+                <label for="serverUrl">Server URL:</label>
+                <input type="text" id="serverUrl" value="ws://localhost:8080/ws" placeholder="ws://localhost:8080/ws">
+            </div>
+            <button id="connectBtn" onclick="connect()">Connect</button>
+            <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+        </div>
+        
+        <div class="panel">
+            <h3>Topic Management</h3>
+            <div class="form-group">
+                <label for="topicName">Topic Name:</label>
+                <input type="text" id="topicName" placeholder="Enter topic name">
+            </div>
+            <button onclick="createTopic()">Create Topic</button>
+            <button onclick="deleteTopic()">Delete Topic</button>
+            <button onclick="listTopics()">List Topics</button>
+        </div>
+        
+        <div class="panel">
+            <h3>Publishing</h3>
+            <div class="form-group">
+                <label for="publishTopic">Topic:</label>
+                <input type="text" id="publishTopic" placeholder="Enter topic name">
+            </div>
+            <div class="form-group">
+                <label for="messageId">Message ID:</label>
+                <input type="text" id="messageId" placeholder="Enter message ID (UUID)">
+            </div>
+            <div class="form-group">
+                <label for="publishData">Message Payload:</label>
+                <textarea id="publishData" rows="3" placeholder="Enter message payload (JSON)"></textarea>
+            </div>
+            <button onclick="publishMessage()">Publish Message</button>
+        </div>
+        
+        <div class="panel">
+            <h3>Subscribing</h3>
+            <div class="form-group">
+                <label for="clientId">Client ID:</label>
+                <input type="text" id="clientId" value="test-client-1" placeholder="Enter client ID">
+            </div>
+            <div class="form-group">
+                <label for="subscribeTopic">Topic:</label>
+                <input type="text" id="subscribeTopic" placeholder="Enter topic name">
+            </div>
+            <div class="form-group">
+                <label for="lastN">Last N Messages:</label>
+                <input type="number" id="lastN" value="5" min="0" max="100" placeholder="Number of historical messages">
+            </div>
+            <button onclick="subscribe()">Subscribe</button>
+            <button onclick="unsubscribe()">Unsubscribe</button>
+        </div>
+    </div>
+    
+    <div class="panel">
+        <h3>Message Log</h3>
+        <div id="messageLog" class="log"></div>
+        <button onclick="clearLog()">Clear Log</button>
+        <button onclick="ping()">Ping</button>
+        <button onclick="generateUUID()">Generate UUID</button>
+    </div>
+
+    <script>
+        let ws = null;
+        let isConnected = false;
+
+        function log(message, type = 'system') {
+            const logDiv = document.getElementById('messageLog');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            messageDiv.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.appendChild(messageDiv);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function updateConnectionStatus() {
+            const statusDiv = document.getElementById('connectionStatus');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            
+            if (isConnected) {
+                statusDiv.textContent = 'Connected';
+                statusDiv.className = 'status connected';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+            } else {
+                statusDiv.textContent = 'Disconnected';
+                statusDiv.className = 'status disconnected';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+            }
+        }
+
+        function connect() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            
+            try {
+                ws = new WebSocket(serverUrl);
+                
+                ws.onopen = function(event) {
+                    isConnected = true;
+                    updateConnectionStatus();
+                    log('Connected to server', 'system');
+                };
+                
+                ws.onmessage = function(event) {
+                    const message = JSON.parse(event.data);
+                    log(`Received: ${JSON.stringify(message, null, 2)}`, 'received');
+                };
+                
+                ws.onclose = function(event) {
+                    isConnected = false;
+                    updateConnectionStatus();
+                    log('Disconnected from server', 'system');
+                };
+                
+                ws.onerror = function(error) {
+                    log(`WebSocket error: ${error}`, 'error');
+                };
+                
+            } catch (error) {
+                log(`Connection error: ${error}`, 'error');
+            }
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+
+        function sendMessage(type, topic, message, clientId, lastN, requestId) {
+            if (!isConnected) {
+                log('Not connected to server', 'error');
+                return;
+            }
+            
+            const clientMessage = {
+                type: type,
+                topic: topic,
+                message: message,
+                client_id: clientId,
+                last_n: lastN || 0,
+                request_id: requestId || generateUUID()
+            };
+            
+            ws.send(JSON.stringify(clientMessage));
+            log(`Sent: ${JSON.stringify(clientMessage, null, 2)}`, 'published');
+        }
+
+        function createTopic() {
+            const topicName = document.getElementById('topicName').value;
+            if (!topicName) {
+                log('Please enter a topic name', 'error');
+                return;
+            }
+            
+            // Use REST API to create topic
+            fetch(`http://localhost:8080/topics`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ name: topicName })
+            })
+            .then(response => response.json())
+            .then(data => {
+                log(`Topic created: ${JSON.stringify(data)}`, 'system');
+            })
+            .catch(error => {
+                log(`Error creating topic: ${error}`, 'error');
+            });
+        }
+
+        function deleteTopic() {
+            const topicName = document.getElementById('topicName').value;
+            if (!topicName) {
+                log('Please enter a topic name', 'error');
+                return;
+            }
+            
+            // Use REST API to delete topic
+            fetch(`http://localhost:8080/topics?name=${encodeURIComponent(topicName)}`, {
+                method: 'DELETE'
+            })
+            .then(response => response.json())
+            .then(data => {
+                log(`Topic deleted: ${JSON.stringify(data)}`, 'system');
+            })
+            .catch(error => {
+                log(`Error deleting topic: ${error}`, 'error');
+            });
+        }
+
+        function listTopics() {
+            // Use REST API to list topics
+            fetch('http://localhost:8080/topics')
+            .then(response => response.json())
+            .then(data => {
+                log(`Topics: ${JSON.stringify(data)}`, 'system');
+            })
+            .catch(error => {
+                log(`Error listing topics: ${error}`, 'error');
+            });
+        }
+
+        function publishMessage() {
+            const topic = document.getElementById('publishTopic').value;
+            const messageId = document.getElementById('messageId').value;
+            const payload = document.getElementById('publishData').value;
+            
+            if (!topic || !messageId || !payload) {
+                log('Please enter topic, message ID, and payload', 'error');
+                return;
+            }
+            
+            let parsedPayload;
+            try {
+                parsedPayload = JSON.parse(payload);
+            } catch (e) {
+                log('Invalid JSON payload. Using as string.', 'system');
+                parsedPayload = payload;
+            }
+            
+            const message = {
+                id: messageId,
+                payload: parsedPayload
+            };
+            
+            sendMessage('publish', topic, message);
+        }
+
+        function subscribe() {
+            const clientId = document.getElementById('clientId').value;
+            const topic = document.getElementById('subscribeTopic').value;
+            const lastN = parseInt(document.getElementById('lastN').value) || 0;
+            
+            if (!clientId || !topic) {
+                log('Please enter both client ID and topic', 'error');
+                return;
+            }
+            
+            sendMessage('subscribe', topic, null, clientId, lastN);
+        }
+
+        function unsubscribe() {
+            const clientId = document.getElementById('clientId').value;
+            const topic = document.getElementById('subscribeTopic').value;
+            
+            if (!clientId || !topic) {
+                log('Please enter both client ID and topic', 'error');
+                return;
+            }
+            
+            sendMessage('unsubscribe', topic, null, clientId);
+        }
+
+        function ping() {
+            sendMessage('ping');
+        }
+
+        function clearLog() {
+            document.getElementById('messageLog').innerHTML = '';
+        }
+
+        function generateUUID() {
+            const uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0;
+                const v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+            document.getElementById('messageId').value = uuid;
+            log(`Generated UUID: ${uuid}`, 'system');
+        }
+
+        // Initialize
+        updateConnectionStatus();
+        log('Test client loaded. Connect to server to start testing.', 'system');
+        generateUUID(); // Generate initial UUID
+    </script>
+</body>
+</html>

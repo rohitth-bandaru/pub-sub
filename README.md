@@ -31,7 +31,60 @@ The system consists of several key components:
 
 ## Configuration
 
-The system can be configured using environment variables:
+The system can be configured using environment variables. Configuration is loaded only once when the system starts from either a `.env` file or system environment variables.
+
+## Logging
+
+The system uses [logrus](https://github.com/sirupsen/logrus) for comprehensive, structured logging with multiple output formats and log levels.
+
+### Log Levels
+
+- **`DEBUG`**: Detailed debugging information including function calls and file locations
+- **`INFO`**: General operational information about system events
+- **`WARN`**: Warning messages for potentially harmful situations
+- **`ERROR`**: Error messages for failed operations
+- **`FATAL`**: Critical errors that cause the system to exit
+
+### Log Formats
+
+- **`text`**: Human-readable text format with colors and timestamps
+- **`json`**: Structured JSON format for log aggregation systems
+
+### Structured Logging
+
+All log messages include structured fields for better debugging and monitoring:
+
+```go
+logrus.WithFields(logrus.Fields{
+    "component": "websocket",
+    "action": "connect",
+    "client_id": "client-123",
+    "remote_addr": "192.168.1.100",
+    "user_agent": "Mozilla/5.0...",
+}).Info("WebSocket client connected successfully")
+```
+
+### Logging Examples
+
+#### WebSocket Operations
+```
+INFO[2025-08-29T10:52:28+05:30] WebSocket client connected successfully  client_id=client-123 action=connect remote_addr=192.168.1.100 user_agent=Mozilla/5.0...
+```
+
+#### Pub/Sub Operations
+```
+INFO[2025-08-29T10:52:29+05:30] Topic created successfully  topic=orders action=create
+INFO[2025-08-29T10:52:30+05:30] Message published successfully  topic=orders message_id=msg-456 action=publish subscribers_count=3
+INFO[2025-08-29T10:52:31+05:30] Subscriber subscribed successfully  subscriber_id=sub-789 topic=orders action=subscribe historical_messages=5 total_subscribers=4
+```
+
+#### Error Handling
+```
+WARN[2025-08-29T10:52:32+05:30] Subscriber disconnected due to channel overflow  subscriber_id=sub-789 topic=orders action=disconnect reason=channel_overflow
+ERROR[2025-08-29T10:52:33+05:30] WebSocket upgrade failed  error=invalid upgrade request remote_addr=192.168.1.100 user_agent=curl/7.68.0
+```
+
+### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -41,6 +94,28 @@ The system can be configured using environment variables:
 | `MAX_PUBLISH_RATE` | `100` | Maximum publish rate per topic (messages/sec) |
 | `WS_READ_BUFFER_SIZE` | `1024` | WebSocket read buffer size |
 | `WS_WRITE_BUFFER_SIZE` | `1024` | WebSocket write buffer size |
+| `LOG_LEVEL` | `info` | Logging level (debug, info, warn, error, fatal) |
+| `LOG_FORMAT` | `text` | Logging format (text, json) |
+
+### Configuration Files
+
+- **`env`** - Contains the actual configuration values (included in Docker builds)
+- **`env.example`** - Template showing all available configuration options
+
+### Usage
+
+```bash
+# Use default configuration
+./pub-sub
+
+# Override specific values
+PORT=9000 MAX_MESSAGES_PER_TOPIC=500 ./pub-sub
+
+# Use custom .env file
+cp env.example .env
+# Edit .env file with your values
+./pub-sub
+```
 
 ## API Endpoints
 
@@ -153,6 +228,43 @@ curl http://localhost:8080/health
 
 - Go 1.21 or later
 - Docker (optional)
+
+### Debugging
+
+The system provides comprehensive logging for debugging purposes:
+
+#### Enable Debug Logging
+
+```bash
+# Set debug level in .env file
+LOG_LEVEL=debug
+
+# Or override at runtime
+LOG_LEVEL=debug ./pub-sub
+```
+
+#### Debug Information Available
+
+- **Function calls**: File names, line numbers, and function names for debug-level logs
+- **Structured data**: All operations include relevant context (IDs, counts, timestamps)
+- **Performance metrics**: Request durations, subscriber counts, message counts
+- **Error details**: Full error context with stack traces for debugging
+
+#### Log Analysis
+
+```bash
+# Filter logs by component
+grep "component=websocket" logs.txt
+
+# Filter logs by action
+grep "action=connect" logs.txt
+
+# Filter logs by client ID
+grep "client_id=client-123" logs.txt
+
+# JSON format for log aggregation
+LOG_FORMAT=json ./pub-sub | jq '.component, .action, .client_id'
+```
 
 ### Building
 
