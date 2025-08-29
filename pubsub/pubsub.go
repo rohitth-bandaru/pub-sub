@@ -268,17 +268,68 @@ func (ps *PubSub) GetStats() models.Stats {
 	ps.mutex.RLock()
 	defer ps.mutex.RUnlock()
 
-	stats := models.Stats{}
-
-	// Find orders topic if it exists
-	if ordersTopic, exists := ps.topics["orders"]; exists {
-		ordersTopic.mutex.RLock()
-		stats.Topics.Orders.Messages = ordersTopic.MessageCount
-		stats.Topics.Orders.Subscribers = len(ordersTopic.Subscribers)
-		ordersTopic.mutex.RUnlock()
+	stats := models.Stats{
+		TotalTopics:   len(ps.topics),
+		Topics:        make(map[string]models.TopicStats),
+		UptimeSeconds: int(time.Since(ps.startTime).Seconds()),
+		GeneratedAt:   time.Now().Format(time.RFC3339),
 	}
 
+	// Calculate totals and collect topic-specific stats
+	totalMessages := 0
+	totalSubscribers := 0
+
+	for topicName, topic := range ps.topics {
+		topic.mutex.RLock()
+
+		// Create topic stats
+		topicStats := models.TopicStats{
+			Name:          topic.Name,
+			Messages:      topic.MessageCount,
+			Subscribers:   len(topic.Subscribers),
+			CreatedAt:     topic.CreatedAt,
+			LastMessageAt: topic.LastMessageAt,
+		}
+
+		stats.Topics[topicName] = topicStats
+
+		// Accumulate totals
+		totalMessages += topic.MessageCount
+		totalSubscribers += len(topic.Subscribers)
+
+		topic.mutex.RUnlock()
+	}
+
+	stats.TotalMessages = totalMessages
+	stats.TotalSubscribers = totalSubscribers
+	// ActiveConnections will be set by the system service using WebSocket client count
+	stats.ActiveConnections = 0
+
 	return stats
+}
+
+// GetTopicStats returns statistics for a specific topic
+func (ps *PubSub) GetTopicStats(topicName string) (*models.TopicStats, error) {
+	ps.mutex.RLock()
+	defer ps.mutex.RUnlock()
+
+	topic, exists := ps.topics[topicName]
+	if !exists {
+		return nil, errors.New("topic not found")
+	}
+
+	topic.mutex.RLock()
+	defer topic.mutex.RUnlock()
+
+	stats := &models.TopicStats{
+		Name:          topic.Name,
+		Messages:      topic.MessageCount,
+		Subscribers:   len(topic.Subscribers),
+		CreatedAt:     topic.CreatedAt,
+		LastMessageAt: topic.LastMessageAt,
+	}
+
+	return stats, nil
 }
 
 // GetHealth returns system health status
@@ -433,4 +484,24 @@ func (ps *PubSub) sendHistoricalMessages(subscriber *Subscriber, topic *Topic, l
 			return
 		}
 	}
+}
+
+// GetSubscriber returns a subscriber by ID
+func (ps *PubSub) GetSubscriber(subscriberID string) *Subscriber {
+	ps.mutex.RLock()
+	defer ps.mutex.RUnlock()
+
+	if subscriber, exists := ps.subscribers[subscriberID]; exists {
+		return subscriber
+	}
+	return nil
+}
+
+// GetSubscriberChannel returns the message channel for a subscriber
+func (ps *PubSub) GetSubscriberChannel(subscriberID string) chan *models.ServerMessage {
+	subscriber := ps.GetSubscriber(subscriberID)
+	if subscriber != nil {
+		return subscriber.SendChan
+	}
+	return nil
 }

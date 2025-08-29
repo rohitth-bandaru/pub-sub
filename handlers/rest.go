@@ -92,6 +92,27 @@ func (h *RestHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 	h.sendJSONResponse(w, http.StatusOK, response)
 }
 
+// GetTopicStats handles GET /stats/{topic} endpoint
+func (h *RestHandler) GetTopicStats(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	topicName := vars["topic"]
+
+	stats, err := h.systemService.GetTopicStats(topicName)
+	if err != nil {
+		h.logger.Errorf("Failed to get topic stats: %v", err)
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	h.sendJSONResponse(w, http.StatusOK, stats)
+}
+
+// GetActiveClients handles GET /clients endpoint
+func (h *RestHandler) GetActiveClients(w http.ResponseWriter, r *http.Request) {
+	response := h.systemService.GetActiveClients()
+	h.sendJSONResponse(w, http.StatusOK, response)
+}
+
 // GetHealth handles GET /health endpoint
 func (h *RestHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 	response := h.systemService.GetHealth()

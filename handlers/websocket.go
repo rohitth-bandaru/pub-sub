@@ -25,12 +25,14 @@ type WebSocketHandler struct {
 
 // WebSocketClient represents a connected WebSocket client
 type WebSocketClient struct {
-	ID       string                     // Unique client identifier
-	Conn     *websocket.Conn            // WebSocket connection
-	Topics   map[string]bool            // Set of subscribed topics
-	SendChan chan *models.ServerMessage // Channel for sending messages
-	Handler  *WebSocketHandler          // Reference to the handler
-	mutex    sync.RWMutex               // Client-level mutex
+	ID          string                     // Unique client identifier
+	Conn        *websocket.Conn            // WebSocket connection
+	Topics      map[string]string          // Map of topic names to subscription IDs
+	SendChan    chan *models.ServerMessage // Channel for sending messages
+	Handler     *WebSocketHandler          // Reference to the handler
+	mutex       sync.RWMutex               // Client-level mutex
+	stopChan    chan struct{}              // Channel to stop message forwarding
+	ConnectedAt time.Time                  // When the client connected
 }
 
 // NewWebSocketHandler creates a new WebSocket handler
@@ -65,11 +67,13 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 
 	// Create new WebSocket client
 	client := &WebSocketClient{
-		ID:       clientID,
-		Conn:     conn,
-		Topics:   make(map[string]bool),
-		SendChan: make(chan *models.ServerMessage, 100), // Buffer for messages
-		Handler:  h,
+		ID:          clientID,
+		Conn:        conn,
+		Topics:      make(map[string]string),
+		SendChan:    make(chan *models.ServerMessage, 100), // Buffer for messages
+		Handler:     h,
+		stopChan:    make(chan struct{}),
+		ConnectedAt: time.Now(),
 	}
 
 	// Register client
@@ -214,13 +218,15 @@ func (c *WebSocketClient) handleSubscribe(clientMessage *models.ClientMessage) {
 		return
 	}
 
-	if clientMessage.ClientID == "" {
-		c.sendErrorMessage("Missing client ID", "BAD_REQUEST", "Client ID is required for subscribe", clientMessage.RequestID)
-		return
+	// Use provided client ID or fall back to generated WebSocket client ID
+	subscriberID := clientMessage.ClientID
+	if subscriberID == "" {
+		subscriberID = c.ID
+		c.Handler.logger.Debugf("Using generated client ID %s for subscription to topic %s", subscriberID, clientMessage.Topic)
 	}
 
 	// Subscribe to topic
-	err := c.Handler.pubsub.Subscribe(clientMessage.ClientID, clientMessage.Topic, clientMessage.LastN)
+	err := c.Handler.pubsub.Subscribe(subscriberID, clientMessage.Topic, clientMessage.LastN)
 	if err != nil {
 		errorCode := "INTERNAL"
 		if err.Error() == "TOPIC_NOT_FOUND" {
@@ -230,13 +236,62 @@ func (c *WebSocketClient) handleSubscribe(clientMessage *models.ClientMessage) {
 		return
 	}
 
-	// Add topic to client's topic list
+	// Add topic to client's topic list with subscription ID
 	c.mutex.Lock()
-	c.Topics[clientMessage.Topic] = true
+	c.Topics[clientMessage.Topic] = subscriberID
 	c.mutex.Unlock()
+
+	// Start a goroutine to forward messages from pubsub to WebSocket client
+	go c.forwardMessagesFromPubSub(clientMessage.Topic)
 
 	// Send acknowledgment
 	c.sendAcknowledgment(clientMessage.Topic, "ok", clientMessage.RequestID)
+}
+
+// forwardMessagesFromPubSub forwards messages from the pubsub system to the WebSocket client
+func (c *WebSocketClient) forwardMessagesFromPubSub(topicName string) {
+	// Get the subscription ID for this topic
+	c.mutex.RLock()
+	subscriberID, exists := c.Topics[topicName]
+	c.mutex.RUnlock()
+
+	if !exists {
+		c.Handler.logger.Errorf("Topic %s not found in client's topic list", topicName)
+		return
+	}
+
+	// Get the subscriber's message channel from pubsub system
+	messageChan := c.Handler.pubsub.GetSubscriberChannel(subscriberID)
+	if messageChan == nil {
+		c.Handler.logger.Errorf("Subscriber %s not found in pubsub system", subscriberID)
+		return
+	}
+
+	// Listen for messages on the subscriber's channel
+	for {
+		select {
+		case message, ok := <-messageChan:
+			if !ok {
+				// Channel closed, stop forwarding
+				return
+			}
+
+			// Only forward messages for the specific topic
+			if message.Topic == topicName {
+				// Send message to WebSocket client
+				select {
+				case c.SendChan <- message:
+					// Message sent successfully
+				default:
+					// Channel is full, log warning
+					c.Handler.logger.Warnf("WebSocket client %s channel full, dropping message", c.ID)
+				}
+			}
+		case <-c.stopChan:
+			// Stop forwarding
+			return
+		}
+	}
 }
 
 // handleUnsubscribe handles unsubscribe messages
@@ -246,13 +301,15 @@ func (c *WebSocketClient) handleUnsubscribe(clientMessage *models.ClientMessage)
 		return
 	}
 
-	if clientMessage.ClientID == "" {
-		c.sendErrorMessage("Missing client ID", "BAD_REQUEST", "Client ID is required for unsubscribe", clientMessage.RequestID)
-		return
+	// Use provided client ID or fall back to generated WebSocket client ID
+	subscriberID := clientMessage.ClientID
+	if subscriberID == "" {
+		subscriberID = c.ID
+		c.Handler.logger.Debugf("Using generated client ID %s for unsubscription from topic %s", subscriberID, clientMessage.Topic)
 	}
 
 	// Unsubscribe from topic
-	err := c.Handler.pubsub.Unsubscribe(clientMessage.ClientID, clientMessage.Topic)
+	err := c.Handler.pubsub.Unsubscribe(subscriberID, clientMessage.Topic)
 	if err != nil {
 		errorCode := "INTERNAL"
 		if err.Error() == "TOPIC_NOT_FOUND" {
@@ -266,6 +323,10 @@ func (c *WebSocketClient) handleUnsubscribe(clientMessage *models.ClientMessage)
 	c.mutex.Lock()
 	delete(c.Topics, clientMessage.Topic)
 	c.mutex.Unlock()
+
+	// Stop message forwarding for this topic
+	close(c.stopChan)
+	c.stopChan = make(chan struct{}) // Create new stop channel for future subscriptions
 
 	// Send acknowledgment
 	c.sendAcknowledgment(clientMessage.Topic, "ok", clientMessage.RequestID)
@@ -356,18 +417,48 @@ func (h *WebSocketHandler) removeClient(clientID string) {
 		delete(h.clients, clientID)
 		h.mutex.Unlock()
 
-		// Remove client from pub-sub system
-		h.pubsub.RemoveSubscriber(clientID)
+		// Remove all subscriptions for this client
+		for topicName, subscriberID := range client.Topics {
+			h.logger.Debugf("Removing subscription %s from topic %s", subscriberID, topicName)
+			h.pubsub.RemoveSubscriber(subscriberID)
+		}
 
 		h.logger.Infof("WebSocket client disconnected: client_id=%s, topics_subscribed=%d", clientID, topicsCount)
 	} else {
 		delete(h.clients, clientID)
 		h.mutex.Unlock()
-		// Remove client from pub-sub system
+		// Remove client from pub-sub system as fallback
 		h.pubsub.RemoveSubscriber(clientID)
 
 		h.logger.Infof("WebSocket client disconnected: client_id=%s, topics_subscribed=0", clientID)
 	}
+}
+
+// GetActiveClients returns details of all active WebSocket clients
+func (h *WebSocketHandler) GetActiveClients() []models.ClientInfo {
+	h.mutex.RLock()
+	defer h.mutex.RUnlock()
+
+	clients := make([]models.ClientInfo, 0, len(h.clients))
+	for _, client := range h.clients {
+		client.mutex.RLock()
+		topics := make([]string, 0, len(client.Topics))
+		for topicName := range client.Topics {
+			topics = append(topics, topicName)
+		}
+		client.mutex.RUnlock()
+
+		clientInfo := models.ClientInfo{
+			ID:          client.ID,
+			RemoteAddr:  client.Conn.RemoteAddr().String(),
+			Topics:      topics,
+			ConnectedAt: client.ConnectedAt,
+			IsConnected: true,
+		}
+		clients = append(clients, clientInfo)
+	}
+
+	return clients
 }
 
 // generateClientID generates a unique client identifier

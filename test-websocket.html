@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pub/Sub WebSocket Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .section {
+            border: 1px solid #ccc;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        .log {
+            background-color: #f5f5f5;
+            border: 1px solid #ddd;
+            padding: 10px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        input, button {
+            margin: 5px;
+            padding: 8px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 3px;
+        }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <h1>Pub/Sub WebSocket Test</h1>
+    
+    <div class="status" id="status">Disconnected</div>
+    
+    <div class="container">
+        <div class="section">
+            <h3>Connection</h3>
+            <input type="text" id="serverUrl" value="ws://localhost:8080/ws" placeholder="WebSocket URL">
+            <button onclick="connect()">Connect</button>
+            <button onclick="disconnect()">Disconnect</button>
+            
+            <h3>Topic Management</h3>
+            <input type="text" id="topicName" placeholder="Topic name">
+            <button onclick="createTopic()">Create Topic</button>
+            <button onclick="deleteTopic()">Delete Topic</button>
+            
+            <h3>Subscription</h3>
+            <input type="text" id="subscribeTopic" placeholder="Topic to subscribe">
+            <button onclick="subscribe()">Subscribe</button>
+            <button onclick="unsubscribe()">Unsubscribe</button>
+            
+            <h3>Publishing</h3>
+            <input type="text" id="publishTopic" placeholder="Topic to publish to">
+            <input type="text" id="messageId" placeholder="Message ID">
+            <input type="text" id="messagePayload" placeholder="Message payload">
+            <button onclick="publish()">Publish</button>
+        </div>
+        
+        <div class="section">
+            <h3>Messages Received</h3>
+            <div class="log" id="messageLog"></div>
+            <button onclick="clearLog()">Clear Log</button>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let clientId = null;
+        
+        function log(message) {
+            const logDiv = document.getElementById('messageLog');
+            const timestamp = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${timestamp}] ${message}\n`;
+            logDiv.scrollTop = logDiv.scrollBottom;
+        }
+        
+        function updateStatus(connected) {
+            const statusDiv = document.getElementById('status');
+            if (connected) {
+                statusDiv.textContent = `Connected (Client ID: ${clientId})`;
+                statusDiv.className = 'status connected';
+            } else {
+                statusDiv.textContent = 'Disconnected';
+                statusDiv.className = 'status disconnected';
+            }
+        }
+        
+        function connect() {
+            const url = document.getElementById('serverUrl').value;
+            ws = new WebSocket(url);
+            
+            ws.onopen = function() {
+                log('Connected to WebSocket server');
+                clientId = Date.now().toString();
+                updateStatus(true);
+            };
+            
+            ws.onmessage = function(event) {
+                const message = JSON.parse(event.data);
+                log(`Received: ${JSON.stringify(message, null, 2)}`);
+            };
+            
+            ws.onclose = function() {
+                log('Disconnected from WebSocket server');
+                updateStatus(false);
+            };
+            
+            ws.onerror = function(error) {
+                log(`WebSocket error: ${error}`);
+            };
+        }
+        
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+                updateStatus(false);
+            }
+        }
+        
+        function createTopic() {
+            const topicName = document.getElementById('topicName').value;
+            if (!topicName) {
+                alert('Please enter a topic name');
+                return;
+            }
+            
+            fetch('/topics', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ name: topicName })
+            })
+            .then(response => response.json())
+            .then(data => {
+                log(`Topic created: ${JSON.stringify(data)}`);
+            })
+            .catch(error => {
+                log(`Error creating topic: ${error}`);
+            });
+        }
+        
+        function deleteTopic() {
+            const topicName = document.getElementById('topicName').value;
+            if (!topicName) {
+                alert('Please enter a topic name');
+                return;
+            }
+            
+            fetch(`/topics/${topicName}`, {
+                method: 'DELETE'
+            })
+            .then(response => response.json())
+            .then(data => {
+                log(`Topic deleted: ${JSON.stringify(data)}`);
+            })
+            .catch(error => {
+                log(`Error deleting topic: ${error}`);
+            });
+        }
+        
+        function subscribe() {
+            const topic = document.getElementById('subscribeTopic').value;
+            if (!topic) {
+                alert('Please enter a topic to subscribe to');
+                return;
+            }
+            
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert('Please connect to WebSocket first');
+                return;
+            }
+            
+            // client_id is now optional - will use generated WebSocket client ID if not provided
+            const message = {
+                type: 'subscribe',
+                topic: topic,
+                request_id: Date.now().toString()
+                // client_id: clientId, // Optional - will use generated ID if not provided
+            };
+            
+            ws.send(JSON.stringify(message));
+            log(`Subscribed to topic: ${topic} (using generated client ID)`);
+        }
+        
+        function unsubscribe() {
+            const topic = document.getElementById('subscribeTopic').value;
+            if (!topic) {
+                alert('Please enter a topic to unsubscribe from');
+                return;
+            }
+            
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert('Please connect to WebSocket first');
+                return;
+            }
+            
+            // client_id is now optional - will use generated WebSocket client ID if not provided
+            const message = {
+                type: 'unsubscribe',
+                topic: topic,
+                request_id: Date.now().toString()
+                // client_id: clientId, // Optional - will use generated ID if not provided
+            };
+            
+            ws.send(JSON.stringify(message));
+            log(`Unsubscribed from topic: ${topic} (using generated client ID)`);
+        }
+        
+        function publish() {
+            const topic = document.getElementById('publishTopic').value;
+            const messageId = document.getElementById('messageId').value;
+            const payload = document.getElementById('messagePayload').value;
+            
+            if (!topic || !messageId || !payload) {
+                alert('Please fill in all fields');
+                return;
+            }
+            
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert('Please connect to WebSocket first');
+                return;
+            }
+            
+            const message = {
+                type: 'publish',
+                topic: topic,
+                message: {
+                    id: messageId,
+                    payload: payload
+                },
+                request_id: Date.now().toString()
+            };
+            
+            ws.send(JSON.stringify(message));
+            log(`Published message to topic: ${topic}`);
+        }
+        
+        function clearLog() {
+            document.getElementById('messageLog').innerHTML = '';
+        }
+        
+        // Auto-connect on page load
+        window.onload = function() {
+            setTimeout(connect, 1000);
+        };
+    </script>
+</body>
+</html>

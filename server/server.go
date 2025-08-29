@@ -43,13 +43,15 @@ func NewServer(cfg *config.Config, log logger.Logger, pubSub *pubsub.PubSub) *Se
 func (s *Server) setupRouter() {
 	s.router = mux.NewRouter()
 
+	// Initialize handlers first
+	wsHandler := handlers.NewWebSocketHandler(s.pubSub, s.config, s.logger)
+
 	// Initialize services
 	topicService := services.NewTopicService(s.pubSub, s.logger)
 	messageService := services.NewMessageService(s.pubSub, s.logger)
-	systemService := services.NewSystemService(s.pubSub, s.logger)
+	systemService := services.NewSystemService(s.pubSub, s.logger, wsHandler)
 
-	// Initialize handlers
-	wsHandler := handlers.NewWebSocketHandler(s.pubSub, s.config, s.logger)
+	// Initialize REST handler
 	restHandler := handlers.NewRestHandler(topicService, messageService, systemService, s.logger)
 
 	// WebSocket endpoint
@@ -62,6 +64,8 @@ func (s *Server) setupRouter() {
 	s.router.HandleFunc("/topics/{name}", restHandler.DeleteTopic).Methods("DELETE")
 	s.router.HandleFunc("/publish", restHandler.PublishMessage).Methods("POST")
 	s.router.HandleFunc("/stats", restHandler.GetStats).Methods("GET")
+	s.router.HandleFunc("/stats/{topic}", restHandler.GetTopicStats).Methods("GET")
+	s.router.HandleFunc("/clients", restHandler.GetActiveClients).Methods("GET")
 	s.router.HandleFunc("/health", restHandler.GetHealth).Methods("GET")
 
 	// Add middleware

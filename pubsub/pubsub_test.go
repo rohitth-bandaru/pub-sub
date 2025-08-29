@@ -235,12 +235,27 @@ func TestGetStats(t *testing.T) {
 	// Get stats
 	stats := ps.GetStats()
 
-	if stats.Topics.Orders.Messages != 1 {
-		t.Errorf("Expected 1 message, got %d", stats.Topics.Orders.Messages)
+	// Check totals
+	if stats.TotalTopics != 1 {
+		t.Errorf("Expected 1 total topic, got %d", stats.TotalTopics)
 	}
 
-	if stats.Topics.Orders.Subscribers != 0 {
-		t.Errorf("Expected 0 subscribers, got %d", stats.Topics.Orders.Subscribers)
+	if stats.TotalMessages != 1 {
+		t.Errorf("Expected 1 total message, got %d", stats.TotalMessages)
+	}
+
+	// Check specific topic stats
+	ordersStats, exists := stats.Topics["orders"]
+	if !exists {
+		t.Error("Orders topic stats not found")
+	}
+
+	if ordersStats.Messages != 1 {
+		t.Errorf("Expected 1 message in orders topic, got %d", ordersStats.Messages)
+	}
+
+	if ordersStats.Subscribers != 0 {
+		t.Errorf("Expected 0 subscribers in orders topic, got %d", ordersStats.Subscribers)
 	}
 }
 

@@ -49,12 +49,22 @@ type Topic struct {
 
 // Stats represents system statistics
 type Stats struct {
-	Topics struct {
-		Orders struct {
-			Messages    int `json:"messages"`
-			Subscribers int `json:"subscribers"`
-		} `json:"orders"`
-	} `json:"topics"`
+	TotalTopics       int                   `json:"total_topics"`
+	TotalMessages     int                   `json:"total_messages"`
+	TotalSubscribers  int                   `json:"total_subscribers"`
+	ActiveConnections int                   `json:"active_connections"`
+	UptimeSeconds     int                   `json:"uptime_seconds"`
+	Topics            map[string]TopicStats `json:"topics"`
+	GeneratedAt       string                `json:"generated_at"`
+}
+
+// TopicStats represents statistics for a specific topic
+type TopicStats struct {
+	Name          string    `json:"name"`
+	Messages      int       `json:"messages"`
+	Subscribers   int       `json:"subscribers"`
+	CreatedAt     time.Time `json:"created_at"`
+	LastMessageAt time.Time `json:"last_message_at"`
 }
 
 // Health represents system health status
@@ -85,4 +95,24 @@ type TopicResponse struct {
 type PublishResponse struct {
 	Status string `json:"status"`
 	Topic  string `json:"topic"`
+}
+
+// ClientInfo represents information about a WebSocket client
+type ClientInfo struct {
+	ID          string    `json:"id"`           // Unique client identifier
+	RemoteAddr  string    `json:"remote_addr"`  // Client's remote address
+	Topics      []string  `json:"topics"`       // List of subscribed topics
+	ConnectedAt time.Time `json:"connected_at"` // When the client connected
+	IsConnected bool      `json:"is_connected"` // Current connection status
+}
+
+// ClientList represents a list of WebSocket clients
+type ClientList struct {
+	Clients []ClientInfo `json:"clients"`
+	Total   int          `json:"total"` // Total number of clients
+}
+
+// WebSocketClientProvider interface for getting WebSocket client information
+type WebSocketClientProvider interface {
+	GetActiveClients() []ClientInfo
 }
