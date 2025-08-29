@@ -6,6 +6,7 @@ import (
 	"pub-sub/logger"
 	"pub-sub/models"
 	"pub-sub/services"
+	"time"
 
 	"github.com/gorilla/mux"
 )
@@ -36,14 +37,18 @@ func (h *RestHandler) CreateTopic(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		h.logger.Warnf("Invalid request body: %v", err)
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		h.sendErrorResponse(w, http.StatusBadRequest, "Invalid request body", "INVALID_JSON")
 		return
 	}
 
 	response, err := h.topicService.CreateTopic(request.Name)
 	if err != nil {
 		h.logger.Errorf("Failed to create topic: %v", err)
-		http.Error(w, err.Error(), http.StatusConflict)
+		statusCode := http.StatusInternalServerError
+		if models.IsErrorType(err, models.ErrTopicExists) {
+			statusCode = http.StatusConflict
+		}
+		h.sendErrorResponse(w, statusCode, err.Error(), "TOPIC_CREATION_FAILED")
 		return
 	}
 
@@ -58,7 +63,11 @@ func (h *RestHandler) DeleteTopic(w http.ResponseWriter, r *http.Request) {
 	response, err := h.topicService.DeleteTopic(topicName)
 	if err != nil {
 		h.logger.Errorf("Failed to delete topic: %v", err)
-		http.Error(w, err.Error(), http.StatusNotFound)
+		statusCode := http.StatusInternalServerError
+		if models.IsErrorType(err, models.ErrTopicNotFound) {
+			statusCode = http.StatusNotFound
+		}
+		h.sendErrorResponse(w, statusCode, err.Error(), "TOPIC_DELETION_FAILED")
 		return
 	}
 
@@ -79,7 +88,11 @@ func (h *RestHandler) GetTopic(w http.ResponseWriter, r *http.Request) {
 	topic, err := h.topicService.GetTopic(topicName)
 	if err != nil {
 		h.logger.Errorf("Failed to get topic: %v", err)
-		http.Error(w, err.Error(), http.StatusNotFound)
+		statusCode := http.StatusInternalServerError
+		if models.IsErrorType(err, models.ErrTopicNotFound) {
+			statusCode = http.StatusNotFound
+		}
+		h.sendErrorResponse(w, statusCode, err.Error(), "TOPIC_NOT_FOUND")
 		return
 	}
 
@@ -100,7 +113,11 @@ func (h *RestHandler) GetTopicStats(w http.ResponseWriter, r *http.Request) {
 	stats, err := h.systemService.GetTopicStats(topicName)
 	if err != nil {
 		h.logger.Errorf("Failed to get topic stats: %v", err)
-		http.Error(w, err.Error(), http.StatusNotFound)
+		statusCode := http.StatusInternalServerError
+		if models.IsErrorType(err, models.ErrTopicNotFound) {
+			statusCode = http.StatusNotFound
+		}
+		h.sendErrorResponse(w, statusCode, err.Error(), "STATS_RETRIEVAL_FAILED")
 		return
 	}
 
@@ -128,14 +145,22 @@ func (h *RestHandler) PublishMessage(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		h.logger.Warnf("Invalid request body: %v", err)
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		h.sendErrorResponse(w, http.StatusBadRequest, "Invalid request body", "INVALID_JSON")
 		return
 	}
 
 	response, err := h.messageService.PublishMessage(request.Topic, request.Message)
 	if err != nil {
 		h.logger.Errorf("Failed to publish message: %v", err)
-		http.Error(w, err.Error(), http.StatusNotFound)
+		statusCode := http.StatusInternalServerError
+		if models.IsErrorType(err, models.ErrTopicNotFound) {
+			statusCode = http.StatusNotFound
+		} else if models.IsErrorType(err, models.ErrTopicRequired) || 
+		          models.IsErrorType(err, models.ErrMessageRequired) || 
+		          models.IsErrorType(err, models.ErrMessageIDRequired) {
+			statusCode = http.StatusBadRequest
+		}
+		h.sendErrorResponse(w, statusCode, err.Error(), "MESSAGE_PUBLISH_FAILED")
 		return
 	}
 
@@ -149,6 +174,30 @@ func (h *RestHandler) sendJSONResponse(w http.ResponseWriter, statusCode int, da
 
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		h.logger.Errorf("Failed to encode JSON response: %v", err)
+		h.sendErrorResponse(w, http.StatusInternalServerError, "Internal server error", "JSON_ENCODING_FAILED")
+	}
+}
+
+// sendErrorResponse sends a structured error response
+func (h *RestHandler) sendErrorResponse(w http.ResponseWriter, statusCode int, message, code string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+
+	errorResponse := struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+		Timestamp string `json:"timestamp"`
+	}{
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+	errorResponse.Error.Code = code
+	errorResponse.Error.Message = message
+
+	if err := json.NewEncoder(w).Encode(errorResponse); err != nil {
+		h.logger.Errorf("Failed to encode error response: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 	}
 }
+

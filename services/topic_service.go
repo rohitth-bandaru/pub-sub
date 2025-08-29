@@ -1,10 +1,10 @@
 package services
 
 import (
-	"errors"
 	"pub-sub/logger"
 	"pub-sub/models"
 	"pub-sub/pubsub"
+	"time"
 )
 
 // TopicService handles topic-related business logic
@@ -24,7 +24,7 @@ func NewTopicService(pubSub *pubsub.PubSub, log logger.Logger) *TopicService {
 // CreateTopic creates a new topic
 func (s *TopicService) CreateTopic(name string) (*models.TopicResponse, error) {
 	if name == "" {
-		return nil, errors.New("topic name is required")
+		return nil, models.ErrTopicRequired
 	}
 
 	if err := s.pubSub.CreateTopic(name); err != nil {
@@ -42,7 +42,7 @@ func (s *TopicService) CreateTopic(name string) (*models.TopicResponse, error) {
 // DeleteTopic deletes a topic
 func (s *TopicService) DeleteTopic(name string) (*models.TopicResponse, error) {
 	if name == "" {
-		return nil, errors.New("topic name is required")
+		return nil, models.ErrTopicRequired
 	}
 
 	if err := s.pubSub.DeleteTopic(name); err != nil {
@@ -57,24 +57,32 @@ func (s *TopicService) DeleteTopic(name string) (*models.TopicResponse, error) {
 	}, nil
 }
 
-// ListTopics returns all topics
+// ListTopics returns a list of all topics
 func (s *TopicService) ListTopics() *models.TopicList {
 	topics := s.pubSub.GetTopics()
-	return &models.TopicList{Topics: topics}
+	return &models.TopicList{
+		Topics: topics,
+	}
 }
 
 // GetTopic returns a specific topic
-func (s *TopicService) GetTopic(name string) (*models.TopicInfo, error) {
+func (s *TopicService) GetTopic(name string) (*models.Topic, error) {
 	if name == "" {
-		return nil, errors.New("topic name is required")
+		return nil, models.ErrTopicRequired
 	}
 
 	topics := s.pubSub.GetTopics()
 	for _, topic := range topics {
 		if topic.Name == name {
-			return &topic, nil
+			return &models.Topic{
+				Name:          topic.Name,
+				Subscribers:   topic.Subscribers,
+				MessageCount:  0, // This would need to be implemented in pubsub
+				CreatedAt:     time.Time{}, // This would need to be implemented in pubsub
+				LastMessageAt: time.Time{}, // This would need to be implemented in pubsub
+			}, nil
 		}
 	}
 
-	return nil, errors.New("topic not found")
+	return nil, models.ErrTopicNotFound
 }

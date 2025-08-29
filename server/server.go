@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"pub-sub/config"
@@ -23,14 +24,18 @@ type Server struct {
 	pubSub     *pubsub.PubSub
 	httpServer *http.Server
 	router     *mux.Router
+	wsHandler  *handlers.WebSocketHandler
+	mu         sync.RWMutex
+	shutdown   chan struct{}
 }
 
 // NewServer creates a new server instance
 func NewServer(cfg *config.Config, log logger.Logger, pubSub *pubsub.PubSub) *Server {
 	server := &Server{
-		config: cfg,
-		logger: log,
-		pubSub: pubSub,
+		config:   cfg,
+		logger:   log,
+		pubSub:   pubSub,
+		shutdown: make(chan struct{}),
 	}
 
 	server.setupRouter()
@@ -44,18 +49,18 @@ func (s *Server) setupRouter() {
 	s.router = mux.NewRouter()
 
 	// Initialize handlers first
-	wsHandler := handlers.NewWebSocketHandler(s.pubSub, s.config, s.logger)
+	s.wsHandler = handlers.NewWebSocketHandler(s.pubSub, s.config, s.logger)
 
 	// Initialize services
 	topicService := services.NewTopicService(s.pubSub, s.logger)
 	messageService := services.NewMessageService(s.pubSub, s.logger)
-	systemService := services.NewSystemService(s.pubSub, s.logger, wsHandler)
+	systemService := services.NewSystemService(s.pubSub, s.logger, s.wsHandler)
 
 	// Initialize REST handler
 	restHandler := handlers.NewRestHandler(topicService, messageService, systemService, s.logger)
 
 	// WebSocket endpoint
-	s.router.HandleFunc("/ws", wsHandler.HandleWebSocket)
+	s.router.HandleFunc("/ws", s.wsHandler.HandleWebSocket)
 
 	// REST API endpoints
 	s.router.HandleFunc("/topics", restHandler.CreateTopic).Methods("POST")
@@ -71,6 +76,9 @@ func (s *Server) setupRouter() {
 	// Add middleware
 	s.router.Use(middleware.LoggingMiddleware(s.logger))
 	s.router.Use(middleware.CORSMiddleware())
+
+	// Add panic recovery middleware
+	s.router.Use(middleware.RecoveryMiddleware(s.logger))
 }
 
 // setupHTTPServer configures the HTTP server
@@ -103,16 +111,35 @@ func (s *Server) Start() error {
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.logger.Info("Shutting down server...")
 
+	// Signal shutdown to all components
+	close(s.shutdown)
+
+	// Gracefully shutdown WebSocket connections
+	if s.wsHandler != nil {
+		s.wsHandler.Shutdown(ctx)
+	}
+
+	// Attempt graceful shutdown
 	if err := s.httpServer.Shutdown(ctx); err != nil {
 		s.logger.Errorf("Server forced to shutdown: %v", err)
 		return err
 	}
 
-	s.logger.Info("Server exited")
+	s.logger.Info("Server exited gracefully")
 	return nil
 }
 
 // GetAddr returns the server address
 func (s *Server) GetAddr() string {
 	return s.httpServer.Addr
+}
+
+// IsShuttingDown returns true if the server is in shutdown mode
+func (s *Server) IsShuttingDown() bool {
+	select {
+	case <-s.shutdown:
+		return true
+	default:
+		return false
+	}
 }

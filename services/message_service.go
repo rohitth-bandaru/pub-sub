@@ -1,7 +1,6 @@
 package services
 
 import (
-	"errors"
 	"pub-sub/logger"
 	"pub-sub/models"
 	"pub-sub/pubsub"
@@ -24,15 +23,15 @@ func NewMessageService(pubSub *pubsub.PubSub, log logger.Logger) *MessageService
 // PublishMessage publishes a message to a topic
 func (s *MessageService) PublishMessage(topic string, message *models.Message) (*models.PublishResponse, error) {
 	if topic == "" {
-		return nil, errors.New("topic is required")
+		return nil, models.ErrTopicRequired
 	}
 
 	if message == nil {
-		return nil, errors.New("message is required")
+		return nil, models.ErrMessageRequired
 	}
 
 	if message.ID == "" {
-		return nil, errors.New("message ID is required")
+		return nil, models.ErrMessageIDRequired
 	}
 
 	if err := s.pubSub.PublishMessage(topic, message); err != nil {

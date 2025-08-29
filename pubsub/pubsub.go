@@ -1,7 +1,6 @@
 package pubsub
 
 import (
-	"errors"
 	"pub-sub/config"
 	"pub-sub/logger"
 	"pub-sub/models"
@@ -57,7 +56,7 @@ func (ps *PubSub) CreateTopic(name string) error {
 
 	// Check if topic already exists
 	if _, exists := ps.topics[name]; exists {
-		return errors.New("topic already exists")
+		return models.ErrTopicExists
 	}
 
 	// Create new topic with circular buffer for messages
@@ -83,7 +82,7 @@ func (ps *PubSub) DeleteTopic(name string) error {
 
 	topic, exists := ps.topics[name]
 	if !exists {
-		return errors.New("topic does not exist")
+		return models.ErrTopicNotFound
 	}
 
 	// Notify all subscribers that topic is being deleted
@@ -132,7 +131,7 @@ func (ps *PubSub) PublishMessage(topicName string, message *models.Message) erro
 	ps.mutex.RUnlock()
 
 	if !exists {
-		return errors.New("TOPIC_NOT_FOUND")
+		return models.ErrTopicNotFound
 	}
 
 	// Add message to topic with circular buffer logic
@@ -169,7 +168,7 @@ func (ps *PubSub) Subscribe(subscriberID, topicName string, lastN int) error {
 	ps.mutex.RUnlock()
 
 	if !exists {
-		return errors.New("TOPIC_NOT_FOUND")
+		return models.ErrTopicNotFound
 	}
 
 	// Get or create subscriber
@@ -217,7 +216,7 @@ func (ps *PubSub) Unsubscribe(subscriberID, topicName string) error {
 	ps.mutex.RUnlock()
 
 	if !exists {
-		return errors.New("TOPIC_NOT_FOUND")
+		return models.ErrTopicNotFound
 	}
 
 	// Remove subscriber from topic
@@ -315,7 +314,7 @@ func (ps *PubSub) GetTopicStats(topicName string) (*models.TopicStats, error) {
 
 	topic, exists := ps.topics[topicName]
 	if !exists {
-		return nil, errors.New("topic not found")
+		return nil, models.ErrTopicNotFound
 	}
 
 	topic.mutex.RLock()

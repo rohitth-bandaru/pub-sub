@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"pub-sub/config"
@@ -18,7 +19,8 @@ func main() {
 
 	// Validate configuration
 	if err := cfg.ValidateConfig(); err != nil {
-		panic("Configuration validation failed: " + err.Error())
+		fmt.Fprintf(os.Stderr, "Configuration validation failed: %v\n", err)
+		os.Exit(1)
 	}
 
 	// Initialize logger
@@ -33,10 +35,14 @@ func main() {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 
+	log.Info("Server started successfully. Press Ctrl+C to shutdown gracefully.")
+
 	// Wait for interrupt signal to gracefully shutdown the server
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
+
+	log.Info("Received shutdown signal, starting graceful shutdown...")
 
 	// Create context with timeout for shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -47,4 +53,6 @@ func main() {
 		log.Errorf("Server forced to shutdown: %v", err)
 		os.Exit(1)
 	}
+
+	log.Info("Server shutdown completed successfully")
 }

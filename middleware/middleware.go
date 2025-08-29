@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"pub-sub/logger"
+	"runtime/debug"
 )
 
 // LoggingMiddleware logs all HTTP requests
@@ -38,6 +39,26 @@ func CORSMiddleware() func(http.Handler) http.Handler {
 			}
 
 			// Call the next handler
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RecoveryMiddleware recovers from panics and logs them
+func RecoveryMiddleware(log logger.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() {
+				if err := recover(); err != nil {
+					log.Errorf("Panic recovered: %v\nStack trace: %s", err, debug.Stack())
+					
+					// Return 500 Internal Server Error
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusInternalServerError)
+					w.Write([]byte(`{"error":"Internal server error"}`))
+				}
+			}()
+			
 			next.ServeHTTP(w, r)
 		})
 	}

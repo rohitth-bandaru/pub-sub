@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"pub-sub/config"
@@ -464,4 +465,29 @@ func (h *WebSocketHandler) GetActiveClients() []models.ClientInfo {
 // generateClientID generates a unique client identifier
 func generateClientID() string {
 	return utils.GenerateClientID()
+}
+
+// Shutdown gracefully shuts down all WebSocket connections
+func (h *WebSocketHandler) Shutdown(ctx context.Context) {
+	h.logger.Info("Shutting down WebSocket handler...")
+
+	// Get all clients and close their connections
+	h.mutex.RLock()
+	clients := make([]*WebSocketClient, 0, len(h.clients))
+	for _, client := range h.clients {
+		clients = append(clients, client)
+	}
+	h.mutex.RUnlock()
+
+	// Close all client connections
+	for _, client := range clients {
+		// Stop message forwarding goroutines
+		close(client.stopChan)
+
+		// Close WebSocket connection
+		client.Conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseGoingAway, "Server shutting down"))
+		client.Conn.Close()
+	}
+
+	h.logger.Info("WebSocket handler shutdown complete")
 }
